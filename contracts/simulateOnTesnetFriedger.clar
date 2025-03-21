@@ -1,4 +1,3 @@
-;; in my simulate.clar contract i want to reuse what mike is doing. he seems to limit it to segwit, so it would work only for verify-segwit? 
 (define-constant ERR-OUT-OF-BOUNDS u4) ;; (err u1) -- sender does not have enough balance to transfer (err u2) -- sender and recipient are the same principal (err u3) -- amount to send is non-positive
 (define-constant ERR_TX_VALUE_TOO_SMALL (err u5))
 (define-constant ERR_TX_NOT_FOR_RECEIVER (err u6))
@@ -41,8 +40,7 @@
 (define-map swaps uint {sats: (optional uint), btc-receiver: (optional (buff 42)), stx-sender: principal, ustx: uint, stx-receiver: (optional principal), when: uint, expired-height: (optional uint), done: bool, total-penalty: (optional uint), ask-priced: bool})
 (define-map swap-offers {stx-receiver: principal, swap-id: (optional uint)} ;; allows a stx-receiver to do an offer per swap-id and 1 without swap-id
   {stx-sender: (optional principal), ustx: uint, sats: uint, penalty: uint})
-
-(define-map submitted-btc-txs (buff 128) uint)  ;; map between accepted btc txs and swap ids
+;; (define-map submitted-btc-txs (buff 128) uint)  ;; map between accepted btc txs and swap ids
 
 (define-data-var next-id uint u0)
 
@@ -361,10 +359,59 @@
     )
     (ok (map-set swaps id (merge swap {total-penalty: none})))))
 
+;; (define-public (submit-swap 
+;;     (id uint)
+;;     (height uint)
+;;     (blockheader (buff 32))
+;;     (tx {version: (buff 4),
+;;       ins: (list 8
+;;         {outpoint: {hash: (buff 32), index: (buff 4)}, scriptSig: (buff 256), sequence: (buff 4)}),
+;;       outs: (list 8
+;;         {value: (buff 8), scriptPubKey: (buff 128)}),
+;;       locktime: (buff 4)}) 
+;;     (proof { tx-index: uint, hashes: (list 12 (buff 32)), tree-depth: uint })
+;;     (fees <fees-trait>)) ;; any user can submit a tx that contains the swap
+;;   (let ((swap (unwrap! (map-get? swaps id) ERR_INVALID_ID))
+;;         (tx-buff (contract-call? 'SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.clarity-bitcoin-helper concat-tx tx))
+;;         (stx-receiver (unwrap! (get stx-receiver swap) ERR_NO_STX_RECEIVER))
+;;         (btc-receiver (unwrap! (get btc-receiver swap) ERR_NO_BTC_RECEIVER)))
+;;       (asserts! (> burn-block-height (+ (get when swap) cooldown)) ERR_IN_COOLDOWN)
+;;       (match (get expired-height swap)
+;;               some-height (asserts! (< burn-block-height some-height) ERR_RESERVATION_EXPIRED) ;; not expired
+;;               (asserts! false ERR_NOT_RESERVED)) ;; needs to be reserved
+;;       (asserts! (is-eq tx-sender stx-receiver) ERR_INVALID_STX_RECEIVER)     
+;;       (asserts! (is-eq fees .zero) ERR_INVALID_FEE_CONTRACT)
+;;       (asserts! (not (get done swap)) ERR_ALREADY_DONE)
+;;       (try! (contract-call? fees pay-fees (get ustx swap)))
+;;       (match (contract-call? 'SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.clarity-bitcoin-lib-v5 was-tx-mined-compact
+;;                 height tx-buff blockheader proof )
+;;         result
+;;           (let
+;;             (
+;;               ;; (result-is-true (asserts! result ERR_PROOF_FALSE))
+;;               (sats (unwrap! (get sats swap) ERR_NOT_PRICED))
+              
+;;               )
+;;             (asserts! (is-none (map-get? submitted-btc-txs result)) ERR_BTC_TX_ALREADY_USED)
+;;             (match (get out (unwrap! (get-out-value tx btc-receiver) ERR_NATIVE_FAILURE))
+;;               out (if (>= (get value out) sats)
+;;                 (begin
+;;                       (map-set swaps id (merge swap {done: true}))
+;;                       (map-set submitted-btc-txs result id)
+;;                       (as-contract (stx-transfer? (get ustx swap) tx-sender (unwrap! (get stx-receiver swap) ERR_NO_STX_RECEIVER))))
+;;                 ERR_TX_VALUE_TOO_SMALL)
+;;             ERR_TX_NOT_FOR_RECEIVER))
+;;         error (err (* error u1000)))))
+
 (define-public (submit-swap-segwit
     (id uint)
     (height uint)
-    (wtx (buff 4096))
+    (wtx {version: (buff 4),
+      ins: (list 8
+        {outpoint: {hash: (buff 32), index: (buff 4)}, scriptSig: (buff 256), sequence: (buff 4)}),
+      outs: (list 8
+        {value: (buff 8), scriptPubKey: (buff 128)}),
+      locktime: (buff 4)})
     (witness-data (buff 1650))
     (header (buff 80))
     (tx-index uint)
@@ -379,7 +426,7 @@
         (stx-receiver (unwrap! (get stx-receiver swap) ERR_NO_STX_RECEIVER))
         (btc-receiver (unwrap! (get btc-receiver swap) ERR_NO_BTC_RECEIVER))
         (sats (unwrap! (get sats swap) ERR_NOT_PRICED))
-
+        (tx-buff (contract-call? .clarity-bitcoin-helper-wtx concat-wtx wtx witness-data)))
       (asserts! (> burn-block-height (+ (get when swap) cooldown)) ERR_IN_COOLDOWN) 
       (asserts! (is-eq tx-sender stx-receiver) ERR_INVALID_STX_RECEIVER)
       (asserts! (not (get done swap)) ERR_ALREADY_DONE)

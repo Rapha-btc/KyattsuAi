@@ -23,6 +23,7 @@
 (define-constant ERR_RESERVATION_EXPIRED (err u26))
 (define-constant ERR_NOT_RESERVED (err u27))
 (define-constant ERR_SAME_SENDER_RECEIVER (err u28))
+(define-constant ERR-ELEMENT-EXPECTED (err u29))
 (define-constant ERR_NATIVE_FAILURE (err u99)) ;; this is not necessary?
 (define-constant nexus (as-contract tx-sender))
 (define-constant expiry u14)
@@ -361,27 +362,32 @@
 
 (define-public (submit-swap-segwit
     (id uint)
-    (height uint) ;; mike same
-    (wtx (buff 4096)) ;; mike same / cahnged from Friedger 
+    (height uint) 
+    (wtx {version: (buff 4),
+      ins: (list 8
+        {outpoint: {hash: (buff 32), index: (buff 4)}, scriptSig: (buff 256), sequence: (buff 4)}),
+      outs: (list 8
+        {value: (buff 8), scriptPubKey: (buff 128)}),
+      locktime: (buff 4)})
     (witness-data (buff 1650))
-    (header (buff 80)) ;; mike same
-    (tx-index uint) ;; mike same
-    (tree-depth uint)
-    (wproof (list 14 (buff 32)))
-    (witness-merkle-root (buff 32))
-    (witness-reserved-value (buff 32))
-    (ctx (buff 1024))
-    (cproof (list 14 (buff 32)))
+    (header (buff 80)) 
+    (tx-index uint) 
+    (tree-depth uint) 
+    (wproof (list 14 (buff 32))) 
+    (witness-merkle-root (buff 32)) 
+    (witness-reserved-value (buff 32)) 
+    (ctx (buff 1024)) 
+    (cproof (list 14 (buff 32))) 
     (fees <fees-trait>))
   (let ((swap (unwrap! (map-get? swaps id) ERR_INVALID_ID))
         (stx-receiver (unwrap! (get stx-receiver swap) ERR_NO_STX_RECEIVER))
         (btc-receiver (unwrap! (get btc-receiver swap) ERR_NO_BTC_RECEIVER))
         (sats (unwrap! (get sats swap) ERR_NOT_PRICED))
         (penalty (calculate-penalty (get ustx swap)))
-        (remaining-penalty (- (default-to penalty (get total-penalty swap)) penalty)))
-        ;; (tx-buff (contract-call? .clarity-bitcoin-helper-wtx concat-wtx wtx witness-data)))
+        (remaining-penalty (- (default-to penalty (get total-penalty swap)) penalty))
+        (tx-buff (contract-call? .clarity-bitcoin-helper-wtx concat-wtx wtx witness-data)))
       (asserts! (> burn-block-height (+ (get when swap) cooldown)) ERR_IN_COOLDOWN) 
-      (asserts! (is-eq tx-sender stx-receiver) ERR_INVALID_STX_RECEIVER)
+      ;; (asserts! (is-eq tx-sender stx-receiver) ERR_INVALID_STX_RECEIVER) -> anyone can call it
       (asserts! (not (get done swap)) ERR_ALREADY_DONE)
       (match (get expired-height swap)
               some-height (asserts! (< burn-block-height some-height) ERR_RESERVATION_EXPIRED) ;; not expired
@@ -389,17 +395,39 @@
       (asserts! (is-eq fees .zero) ERR_INVALID_FEE_CONTRACT)
       (try! (contract-call? fees pay-fees (get ustx swap)))
       (match (contract-call? 'SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.clarity-bitcoin-lib-v5 was-segwit-tx-mined-compact
-                height wtx header tx-index tree-depth wproof witness-merkle-root witness-reserved-value ctx cproof)
+                    height 
+                    tx-buff 
+                    header 
+                    tx-index 
+                    tree-depth 
+                    wproof 
+                    witness-merkle-root 
+                    witness-reserved-value 
+                    ctx 
+                    cproof)
         result
           (begin
-            ;; (asserts! result ERR_PROOF_FALSE)
+            ;; (asserts! result ERR_PROOF_FALSE) ;; do i need this?
             (asserts! (is-none (map-get? submitted-btc-txs result)) ERR_BTC_TX_ALREADY_USED)
             (match (get out (unwrap! (get-out-value wtx btc-receiver) ERR_NATIVE_FAILURE))
               out (if (>= (get value out) sats)
-                (begin
+                (let ((payload (unwrap! (parse-payload-segwit tx-buff) ERR-ELEMENT-EXPECTED))
+                      (stx-receiver-extracted (unwrap! (get p payload) ERR-ELEMENT-EXPECTED));; 'SP000000000000000000002Q6VF78) ;; idk how to extract this from the btc payload
+                      (swap-id-extracted (unwrap! (get i payload) ERR-ELEMENT-EXPECTED))) 
+                      ;; here we assert out on id and stx-receiver differing from payload extracted
+                      (asserts! (is-eq stx-receiver-extracted stx-receiver) ERR_INVALID_STX_RECEIVER)
+                      (asserts! (is-eq swap-id-extracted id) ERR_INVALID_ID)
                       (map-set swaps id (merge swap {done: true}))
                       (map-set submitted-btc-txs result id)
-                      (as-contract (stx-transfer? (get ustx swap) tx-sender (unwrap! (get stx-receiver swap) ERR_NO_STX_RECEIVER))))
+                      (print 
+                        { 
+                          type: "catamaran-swap",
+                          id: id,
+                          done: true,
+                          tx: result
+                        }
+                      )
+                      (as-contract (stx-transfer? (get ustx swap) tx-sender stx-receiver)))
                 ERR_TX_VALUE_TOO_SMALL)
             ERR_TX_NOT_FOR_RECEIVER))
         error (err (* error u1000)))))
@@ -412,33 +440,72 @@
 (define-read-only (get-bid (stx-receiver principal) (id (optional uint)))
   (map-get? swap-offers {stx-receiver: stx-receiver, swap-id: id}))
 
-  (define-public (simulate-swap
-    (id uint))
-  (let ((swap (unwrap! (map-get? swaps id) ERR_INVALID_ID))
-        (stx-sender (get stx-sender swap))
-        (stx-receiver (unwrap! (get stx-receiver swap) ERR_NO_STX_RECEIVER))
-        (btc-receiver (unwrap! (get btc-receiver swap) ERR_NO_BTC_RECEIVER))
-        (sats (unwrap! (get sats swap) ERR_NOT_PRICED))
-        (penalty (calculate-penalty (get ustx swap)))
-        (remaining-penalty (- (default-to penalty (get total-penalty swap)) penalty)))
-      (asserts! (> burn-block-height (+ (get when swap) cooldown)) ERR_IN_COOLDOWN) 
-      (asserts! (is-eq tx-sender stx-receiver) ERR_INVALID_STX_RECEIVER)
-      (asserts! (not (get done swap)) ERR_ALREADY_DONE)
-      (match (get expired-height swap)
-              some-height (asserts! (< burn-block-height some-height) ERR_RESERVATION_EXPIRED) ;; not expired
-              (asserts! false ERR_NOT_RESERVED)) ;; needs to be reserved
-      (print 
-        { 
-          type: "simulate-swap",
-          id: id,
-          done: true,
-        }
+;; (define-public (simulate-swap
+;;     (id uint))
+;;   (let ((swap (unwrap! (map-get? swaps id) ERR_INVALID_ID))
+;;         (stx-sender (get stx-sender swap))
+;;         (stx-receiver (unwrap! (get stx-receiver swap) ERR_NO_STX_RECEIVER))
+;;         (btc-receiver (unwrap! (get btc-receiver swap) ERR_NO_BTC_RECEIVER))
+;;         (sats (unwrap! (get sats swap) ERR_NOT_PRICED))
+;;         (penalty (calculate-penalty (get ustx swap)))
+;;         (remaining-penalty (- (default-to penalty (get total-penalty swap)) penalty)))
+;;       (asserts! (> burn-block-height (+ (get when swap) cooldown)) ERR_IN_COOLDOWN) 
+;;       (asserts! (is-eq tx-sender stx-receiver) ERR_INVALID_STX_RECEIVER)
+;;       (asserts! (not (get done swap)) ERR_ALREADY_DONE)
+;;       (match (get expired-height swap)
+;;               some-height (asserts! (< burn-block-height some-height) ERR_RESERVATION_EXPIRED) ;; not expired
+;;               (asserts! false ERR_NOT_RESERVED)) ;; needs to be reserved
+;;       (print 
+;;         { 
+;;           type: "simulate-swap",
+;;           id: id,
+;;           done: true,
+;;         }
+;;       )
+;;       (match (contract-call? 'STV9K21TBFAK4KNRJXF5DFP8N7W46G4V9RJ5XDY2.sbtc-token transfer sats tx-sender stx-sender (some 0x707265746D69756D))
+;;         result
+;;                 (begin
+;;                       (map-set swaps id (merge swap {done: true, total-penalty: none})) ;; here we keep record of the total penalty at swapping?
+;;                       (try! (as-contract (stx-transfer-memo? penalty tx-sender stx-receiver 0x707265746D69756D))) 
+;;                       (and (> remaining-penalty u0) (try! (as-contract (stx-transfer-memo? remaining-penalty tx-sender stx-sender 0x707265746D69756D)))) ;; claim penalties if any  
+;;                       (as-contract (stx-transfer? (get ustx swap) tx-sender  stx-receiver)))
+;;         error (err (* error u1000)))))
+
+(define-read-only (get-output-segwit (tx (buff 4096)) (index uint))
+  (let
+    (
+      (parsed-tx (contract-call? .clarity-bitcoin-lib-v5 parse-wtx tx false))
+    )
+    (match parsed-tx
+      result
+      (let
+        (
+          (tx-data (unwrap-panic parsed-tx)) 
+          (outs (get outs tx-data)) 
+          (out (unwrap! (element-at? outs index) err-transaction-segwit))
+          (scriptPubKey (get scriptPubKey out))
+          (value (get value out)) 
+        )
+        (ok { scriptPubKey: scriptPubKey, value: value })
       )
-      (match (contract-call? 'STV9K21TBFAK4KNRJXF5DFP8N7W46G4V9RJ5XDY2.sbtc-token transfer sats tx-sender stx-sender (some 0x707265746D69756D))
-        result
-                (begin
-                      (map-set swaps id (merge swap {done: true, total-penalty: none})) ;; here we keep record of the total penalty at swapping?
-                      (try! (as-contract (stx-transfer-memo? penalty tx-sender stx-receiver 0x707265746D69756D))) 
-                      (and (> remaining-penalty u0) (try! (as-contract (stx-transfer-memo? remaining-penalty tx-sender stx-sender 0x707265746D69756D)))) ;; claim penalties if any  
-                      (as-contract (stx-transfer? (get ustx swap) tx-sender  stx-receiver)))
-        error (err (* error u1000)))))
+      missing err-transaction
+    )
+  )
+)
+
+(define-read-only (parse-payload-segwit (tx (buff 4096)))
+  (match (get-output-segwit tx u0)
+    result
+    (let
+      (
+        (script (get scriptPubKey result))
+        (script-len (len script))
+        ;; lenght is dynamic one or two bytes!
+        (offset (if (is-eq (unwrap! (element-at? script u1) err-element-expected) 0x4C) u3 u2)) 
+        (payload (unwrap! (slice? script offset script-len) err-element-expected))
+      )
+      (ok (from-consensus-buff? { i: uint, p: principal } payload))
+    )
+    not-found err-element-expected
+  )
+)
