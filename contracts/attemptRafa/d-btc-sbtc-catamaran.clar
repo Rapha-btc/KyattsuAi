@@ -441,8 +441,10 @@
                       (asserts! (is-eq stx-receiver-extracted stx-receiver) ERR_INVALID_STX_RECEIVER)
                       (asserts! (is-eq swap-id-extracted id) ERR_INVALID_ID)
                       (map-set swaps id (merge swap {done: true, total-penalty: none})) 
-                      (try! (as-contract (stx-transfer-memo? penalty tx-sender stx-receiver 0x707265746D69756D))) 
-                      (and (> remaining-penalty u0) (try! (as-contract (stx-transfer-memo? remaining-penalty tx-sender stx-sender 0x707265746D69756D)))) 
+                      (try! (as-contract (contract-call? 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token 
+                                                transfer penalty tx-sender stx-receiver (some 0x707265746D69756D)))) 
+                      (and (> remaining-penalty u0) (try! (as-contract (contract-call? 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token 
+                                                transfer remaining-penalty tx-sender stx-sender 0x707265746D69756D))))) 
                       (map-set submitted-btc-txs result id)
                       (print 
                         { 
