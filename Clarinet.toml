@@ -11,7 +11,7 @@ clarity_version = 2
 epoch = 2.5
 
 [contracts.simulate]
-path = 'contracts/simulate.clar'
+path = 'contracts/attemptRafa/simulate.clar'
 clarity_version = 2
 epoch = 2.5
 

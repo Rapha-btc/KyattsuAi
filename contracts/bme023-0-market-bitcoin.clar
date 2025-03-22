@@ -321,21 +321,31 @@
     (cproof (list 14 (buff 32)))
   )
   ;; commented out for testing on stacks testnet which is running on bitcoin regtest!
-  (match (contract-call? .clarity-bitcoin-lib-v5 was-segwit-tx-mined-compact height wtx header tx-index tree-depth wproof witness-merkle-root witness-reserved-value ctx cproof)
+  (match (contract-call? .clarity-bitcoin-lib-v5 was-segwit-tx-mined-compact 
+              height 
+              wtx 
+              header 
+              tx-index 
+              tree-depth 
+              wproof 
+              witness-merkle-root 
+              witness-reserved-value 
+              ctx 
+              cproof)
     result (ok true)
     err err-transaction-segwit)
 )
 
-(define-read-only (verify-legacy 
-    (height uint)
-    (wtx (buff 4096))
-    (header (buff 80))
-    (proof { tx-index: uint, hashes: (list 14 (buff 32)), tree-depth: uint})
-  )
-  (match (contract-call? .clarity-bitcoin-lib-v5 was-tx-mined-compact height wtx header proof)
-    result (ok true)
-    err err-transaction-legacy)
-)
+;; (define-read-only (verify-legacy 
+;;     (height uint)
+;;     (wtx (buff 4096))
+;;     (header (buff 80))
+;;     (proof { tx-index: uint, hashes: (list 14 (buff 32)), tree-depth: uint})
+;;   )
+;;   (match (contract-call? .clarity-bitcoin-lib-v5 was-tx-mined-compact height wtx header proof)
+;;     result (ok true)
+;;     err err-transaction-legacy)
+;; )
 
 (define-read-only (get-output-legacy (tx (buff 4096)) (index uint))
   (let

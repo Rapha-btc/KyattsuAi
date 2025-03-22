@@ -85,13 +85,13 @@
     locktime: (buff 4)}) (pubscriptkey (buff 42)))
     (ok (fold find-out (get outs tx) {pubscriptkey: pubscriptkey, out: none})))
 
-(define-public (collateralize-stx (ustx uint) (btc-receiver (optional (buff 42))))
+(define-public (collateralize-stx (ubtc uint) (btc-receiver (optional (buff 42))))
   (let ((id (var-get next-id)))
     (print 
       {
         type: "collateralize-stx",
         id: id,
-        ustx: ustx,
+        ustx: ubtc,
         stxSender: tx-sender,
         btcReceiver: btc-receiver,
         done: false,
@@ -104,10 +104,12 @@
       }
     )
     (asserts! (map-insert swaps id
-      {sats: none, btc-receiver: btc-receiver, ustx: ustx, stx-receiver: none,
+      {sats: none, btc-receiver: btc-receiver, ustx: ubtc, stx-receiver: none,
         stx-sender: tx-sender, when: burn-block-height, expired-height: none, done: false, total-penalty: none, ask-priced: false}) ERR_INVALID_ID)
     (var-set next-id (+ id u1))
-    (match (stx-transfer? ustx tx-sender (as-contract tx-sender)) 
+    (match (contract-call? 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token 
+                transfer
+                    ubtc tx-sender (as-contract tx-sender) none) 
       success (ok id)
       error (err (* error u1000)))))
 
@@ -135,18 +137,18 @@
       ask-priced: true})))))
 
 (define-public (collateralize-and-make-ask
-  (ustx uint) 
+  (ubtc uint) 
   (btc-receiver (buff 42)) 
   (sats uint)
   (stx-receiver (optional principal)))
   (let 
-    ((swap-id (try! (collateralize-stx ustx (some btc-receiver)))))
+    ((swap-id (try! (collateralize-stx ubtc (some btc-receiver)))))
     (try! (make-ask swap-id sats btc-receiver stx-receiver))
     (print   
       {
         type: "collateralize-and-make-ask",
         id: swap-id,
-        ustx: ustx,
+        ustx: ubtc,
         stxSender: tx-sender,
         done: false,
         when: burn-block-height,
@@ -161,19 +163,19 @@
     (ok swap-id)))
 
 (define-public (collateralize-and-take-bid 
-  (ustx uint) 
+  (ubtc uint) 
   (btc-receiver (buff 42))
   (sats uint)
   (stx-receiver principal)) ;; taking a general bid here
   (let 
-    ((swap-id (try! (collateralize-stx ustx (some btc-receiver))))
+    ((swap-id (try! (collateralize-stx ubtc (some btc-receiver))))
     (offer (unwrap! (get-bid stx-receiver none) ERR_NO_SUCH_OFFER)))
     (try! (take-bid swap-id none sats stx-receiver))
     (print   
       {
         type: "collateralize-and-take-bid",
         id: swap-id,
-        ustx: ustx,
+        ustx: ubtc,
         stxSender: tx-sender,
         done: false,
         when: burn-block-height,
@@ -208,13 +210,14 @@
         total-penalty: new-penalty,
       }
     )
-    (try! (stx-transfer-memo? (calculate-penalty (get ustx swap)) tx-sender nexus 0x707265746D69756D)) ;; hold penalty
+    (try! (contract-call? 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token 
+                transfer (calculate-penalty (get ustx swap)) tx-sender nexus 0x707265746D69756D)) ;; hold penalty
     (ok (map-set swaps id (merge swap {stx-receiver: (some tx-sender), expired-height: (some (+ burn-block-height expiry)), when: burn-block-height, total-penalty: new-penalty}))))) ;; expiration kicks in
 
 (define-public (make-bid
   (id (optional uint))
   (stx-sender (optional principal))
-  (ustx (optional uint))
+  (ubtc (optional uint))
   (sats uint)) ;; allowing the BTC sender to initiate swap offers - without a swap-id
   (begin
     (asserts! (is-none (get-bid tx-sender id)) ERR_OFFER_ALREADY_EXISTS)
@@ -227,9 +230,10 @@
               (swap-stx-sender (get stx-sender swap))
               (this-penalty (calculate-penalty swap-ustx)))
           (asserts! (is-eq swap-stx-sender (unwrap! stx-sender ERR_INVALID_STX_SENDER)) ERR_INVALID_STX_SENDER)
-          (asserts! (is-eq ustx (some (get ustx swap))) ERR_USTX)
+          (asserts! (is-eq ubtc (some (get ustx swap))) ERR_USTX)
           (asserts! (not (get done swap)) ERR_ALREADY_DONE) ;; ability to make a bid even when the swap is reserved
-          (try! (stx-transfer-memo? this-penalty tx-sender nexus 0x707265746D69756D)) ;; hold penalty
+          (try! (contract-call? 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token 
+                        transfer this-penalty tx-sender nexus 0x707265746D69756D)) ;; hold penalty
           (print 
             {
               type: "make-bid",
@@ -249,25 +253,26 @@
               penalty: this-penalty,
             })))
       (begin
-        (asserts! (and (is-some ustx) (> (unwrap-panic ustx) u0)) ERR_INVALID_OFFER)
-        (try! (stx-transfer-memo? (calculate-penalty (unwrap-panic ustx)) tx-sender nexus 0x707265746D69756D)) ;; hold penalty
+        (asserts! (and (is-some ubtc) (> (unwrap-panic ubtc) u0)) ERR_INVALID_OFFER)
+        (try! (contract-call? 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token 
+                        transfer (calculate-penalty (unwrap-panic ubtc)) tx-sender nexus 0x707265746D69756D)) ;; hold penalty
         (print 
           {
             type: "make-bid",
             id: none,
             stxReceiver: tx-sender,
             stxSender: stx-sender,
-            ustx: (unwrap-panic ustx),
+            ustx: (unwrap-panic ubtc),
             sats: sats,
-            penalty: (calculate-penalty (unwrap-panic ustx)),
+            penalty: (calculate-penalty (unwrap-panic ubtc)),
           }
         )
         (ok (map-set swap-offers 
           { stx-receiver: tx-sender, swap-id: none }
           { stx-sender: stx-sender,
-            ustx: (unwrap-panic ustx),
+            ustx: (unwrap-panic ubtc),
             sats: sats,
-            penalty: (calculate-penalty (unwrap-panic ustx))}))))))
+            penalty: (calculate-penalty (unwrap-panic ubtc))}))))))
 
 (define-public (take-bid (id uint) (offer-swap-id (optional uint)) (sats uint) (stx-receiver principal))
   (let ((swap (unwrap! (map-get? swaps id) ERR_INVALID_ID))
@@ -308,7 +313,8 @@
   (let ((offer (unwrap! (get-bid tx-sender offer-swap-id) ERR_NO_SUCH_OFFER))
         (penalty (get penalty offer))
         (offerer tx-sender))
-    (and (> penalty u0) (as-contract  (try! (stx-transfer-memo? penalty tx-sender offerer 0x707265746D69756D))))
+    (and (> penalty u0) (as-contract  (try! (contract-call? 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token 
+                                                    transfer penalty tx-sender offerer 0x707265746D69756D))))
     (map-delete swap-offers {stx-receiver: tx-sender, swap-id: offer-swap-id })
     (print
       {
@@ -346,9 +352,11 @@
             some-height (asserts! (>= burn-block-height some-height) ERR_ALREADY_RESERVED) 
             true) 
     (asserts! (not (get done swap)) ERR_ALREADY_DONE)   
-    (try! (as-contract (stx-transfer? (get ustx swap) tx-sender stx-sender)))
+    (try! (as-contract (contract-call? 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token 
+                                transfer (get ustx swap) tx-sender stx-sender none)))
     (and (> total-penalty u0)
-      (try! (as-contract (stx-transfer-memo? total-penalty tx-sender stx-sender 0x707265746D69756D)))) 
+      (try! (as-contract (contract-call? 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token 
+                                transfer total-penalty tx-sender stx-sender 0x707265746D69756D)))) 
     (print 
       {
         type: "claim-collateral",
@@ -368,7 +376,8 @@
             true) ;; or not reserved 
     (asserts! (not (get done swap)) ERR_ALREADY_DONE)
     (asserts! (> total-penalty u0) ERR_NO_PENALTY)
-    (try! (as-contract (stx-transfer-memo? total-penalty tx-sender stx-sender 0x707265746D69756D))) 
+    (try! (as-contract (contract-call? 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token 
+                                transfer total-penalty tx-sender stx-sender 0x707265746D69756D))) 
         (print 
       {
         type: "claim-penalty",
@@ -442,8 +451,10 @@
                           tx: result
                         }
                       )
-                      (try! (as-contract (stx-transfer? fee tx-sender FEE-RECEIVER)))
-                      (try! (as-contract (stx-transfer? ustx-swap-receiver tx-sender stx-receiver)))
+                      (try! (as-contract (contract-call? 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token 
+                                                transfer fee tx-sender FEE-RECEIVER none)))
+                      (try! (as-contract (contract-call? 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token 
+                                                transfer ustx-swap-receiver tx-sender stx-receiver none)))
                       (ok true))
                 ERR_TX_VALUE_TOO_SMALL)
             ERR_TX_NOT_FOR_RECEIVER))
