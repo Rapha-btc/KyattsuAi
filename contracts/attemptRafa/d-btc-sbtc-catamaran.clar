@@ -444,7 +444,7 @@
                       (try! (as-contract (contract-call? 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token 
                                                 transfer penalty tx-sender stx-receiver (some 0x707265746D69756D)))) 
                       (and (> remaining-penalty u0) (try! (as-contract (contract-call? 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token 
-                                                transfer remaining-penalty tx-sender stx-sender 0x707265746D69756D))))) 
+                                                transfer remaining-penalty tx-sender stx-sender (some 0x707265746D69756D))))) 
                       (map-set submitted-btc-txs result id)
                       (print 
                         { 
