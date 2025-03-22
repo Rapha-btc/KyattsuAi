@@ -227,7 +227,7 @@
               (swap-stx-sender (get stx-sender swap))
               (this-penalty (calculate-penalty swap-ustx)))
           (asserts! (is-eq swap-stx-sender (unwrap! stx-sender ERR_INVALID_STX_SENDER)) ERR_INVALID_STX_SENDER)
-          (asserts! (is-eq ustx (some (get ustx swap))) ERR_USTX)
+          (asserts! (is-eq ustx (some swap-ustx)) ERR_USTX)
           (asserts! (not (get done swap)) ERR_ALREADY_DONE) ;; ability to make a bid even when the swap is reserved
           (try! (stx-transfer-memo? this-penalty tx-sender nexus 0x707265746D69756D)) ;; hold penalty
           (print 
@@ -432,7 +432,9 @@
                       (ustx-swap-receiver (- ustx-swap fee))) 
                       (asserts! (is-eq stx-receiver-extracted stx-receiver) ERR_INVALID_STX_RECEIVER)
                       (asserts! (is-eq swap-id-extracted id) ERR_INVALID_ID)
-                      (map-set swaps id (merge swap {done: true}))
+                      (map-set swaps id (merge swap {done: true, total-penalty: none})) 
+                      (try! (as-contract (stx-transfer-memo? penalty tx-sender stx-receiver 0x707265746D69756D))) 
+                      (and (> remaining-penalty u0) (try! (as-contract (stx-transfer-memo? remaining-penalty tx-sender stx-sender 0x707265746D69756D)))) 
                       (map-set submitted-btc-txs result id)
                       (print 
                         { 

@@ -108,8 +108,7 @@
         stx-sender: tx-sender, when: burn-block-height, expired-height: none, done: false, total-penalty: none, ask-priced: false}) ERR_INVALID_ID)
     (var-set next-id (+ id u1))
     (match (contract-call? 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token 
-                transfer
-                    ubtc tx-sender (as-contract tx-sender) none) 
+                transfer ubtc tx-sender (as-contract tx-sender) none) 
       success (ok id)
       error (err (* error u1000)))))
 
@@ -211,7 +210,7 @@
       }
     )
     (try! (contract-call? 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token 
-                transfer (calculate-penalty (get ustx swap)) tx-sender nexus 0x707265746D69756D)) ;; hold penalty
+                transfer (calculate-penalty (get ustx swap)) tx-sender nexus (some 0x707265746D69756D))) ;; hold penalty
     (ok (map-set swaps id (merge swap {stx-receiver: (some tx-sender), expired-height: (some (+ burn-block-height expiry)), when: burn-block-height, total-penalty: new-penalty}))))) ;; expiration kicks in
 
 (define-public (make-bid
@@ -230,10 +229,10 @@
               (swap-stx-sender (get stx-sender swap))
               (this-penalty (calculate-penalty swap-ustx)))
           (asserts! (is-eq swap-stx-sender (unwrap! stx-sender ERR_INVALID_STX_SENDER)) ERR_INVALID_STX_SENDER)
-          (asserts! (is-eq ubtc (some (get ustx swap))) ERR_USTX)
+          (asserts! (is-eq ubtc (some swap-ustx)) ERR_USTX)
           (asserts! (not (get done swap)) ERR_ALREADY_DONE) ;; ability to make a bid even when the swap is reserved
           (try! (contract-call? 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token 
-                        transfer this-penalty tx-sender nexus 0x707265746D69756D)) ;; hold penalty
+                        transfer this-penalty tx-sender nexus (some 0x707265746D69756D))) ;; hold penalty
           (print 
             {
               type: "make-bid",
@@ -255,7 +254,7 @@
       (begin
         (asserts! (and (is-some ubtc) (> (unwrap-panic ubtc) u0)) ERR_INVALID_OFFER)
         (try! (contract-call? 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token 
-                        transfer (calculate-penalty (unwrap-panic ubtc)) tx-sender nexus 0x707265746D69756D)) ;; hold penalty
+                        transfer (calculate-penalty (unwrap-panic ubtc)) tx-sender nexus (some 0x707265746D69756D))) ;; hold penalty
         (print 
           {
             type: "make-bid",
@@ -314,7 +313,7 @@
         (penalty (get penalty offer))
         (offerer tx-sender))
     (and (> penalty u0) (as-contract  (try! (contract-call? 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token 
-                                                    transfer penalty tx-sender offerer 0x707265746D69756D))))
+                                                    transfer penalty tx-sender offerer (some 0x707265746D69756D)))))
     (map-delete swap-offers {stx-receiver: tx-sender, swap-id: offer-swap-id })
     (print
       {
@@ -356,7 +355,7 @@
                                 transfer (get ustx swap) tx-sender stx-sender none)))
     (and (> total-penalty u0)
       (try! (as-contract (contract-call? 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token 
-                                transfer total-penalty tx-sender stx-sender 0x707265746D69756D)))) 
+                                transfer total-penalty tx-sender stx-sender (some 0x707265746D69756D))))) 
     (print 
       {
         type: "claim-collateral",
@@ -377,7 +376,7 @@
     (asserts! (not (get done swap)) ERR_ALREADY_DONE)
     (asserts! (> total-penalty u0) ERR_NO_PENALTY)
     (try! (as-contract (contract-call? 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token 
-                                transfer total-penalty tx-sender stx-sender 0x707265746D69756D))) 
+                                transfer total-penalty tx-sender stx-sender (some 0x707265746D69756D)))) 
         (print 
       {
         type: "claim-penalty",
@@ -441,7 +440,9 @@
                       (ustx-swap-receiver (- ustx-swap fee))) 
                       (asserts! (is-eq stx-receiver-extracted stx-receiver) ERR_INVALID_STX_RECEIVER)
                       (asserts! (is-eq swap-id-extracted id) ERR_INVALID_ID)
-                      (map-set swaps id (merge swap {done: true}))
+                      (map-set swaps id (merge swap {done: true, total-penalty: none})) 
+                      (try! (as-contract (stx-transfer-memo? penalty tx-sender stx-receiver 0x707265746D69756D))) 
+                      (and (> remaining-penalty u0) (try! (as-contract (stx-transfer-memo? remaining-penalty tx-sender stx-sender 0x707265746D69756D)))) 
                       (map-set submitted-btc-txs result id)
                       (print 
                         { 
