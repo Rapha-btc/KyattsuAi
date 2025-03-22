@@ -100,7 +100,6 @@
         total-penalty: none,
         stxReceiver: none,
         when: burn-block-height,
-        fees: "zero",
       }
     )
     (asserts! (map-insert swaps id
@@ -151,7 +150,6 @@
         stxSender: tx-sender,
         done: false,
         when: burn-block-height,
-        fees: "zero",
         sats: (some sats),
         btcReceiver: (some btc-receiver),
         stxReceiver: stx-receiver,
@@ -178,7 +176,6 @@
         stxSender: tx-sender,
         done: false,
         when: burn-block-height,
-        fees: "zero",
         sats: (some sats),
         btcReceiver: (some btc-receiver),
         stxReceiver: stx-receiver,
@@ -192,13 +189,14 @@
 (define-public (take-ask (id uint)) ;; BTC sender accepts the initial offer of STX sender
   (let ((swap (unwrap! (map-get? swaps id) ERR_INVALID_ID))
     (stx-receiver (default-to tx-sender (get stx-receiver swap)))
-    (new-penalty (some (+ (calculate-penalty (get ustx swap)) (default-to u0 (get total-penalty swap))))))
+    (this-penalty (calculate-penalty (get ustx swap)))
+    (new-penalty (some (+ this-penalty (default-to u0 (get total-penalty swap))))))
     (asserts! (get ask-priced swap) ERR_NOT_PRICED)
     (asserts! (not (is-eq tx-sender (get stx-sender swap))) ERR_SAME_SENDER_RECEIVER) 
     (asserts! (not (get done swap)) ERR_ALREADY_DONE)
     (match (get expired-height swap)
             some-height (asserts! (>= burn-block-height some-height) ERR_ALREADY_RESERVED) 
-            (asserts! (is-eq tx-sender stx-receiver) ERR_INVALID_STX_RECEIVER)) ;; for private swaps, it was never reserved but stx-reveiver may be designated
+            (asserts! (is-eq tx-sender stx-receiver) ERR_INVALID_STX_RECEIVER)) ;; for private swaps, it was never reserved but stx-receiver may be designated
     (print 
       {
         type: "take-ask",
@@ -210,7 +208,7 @@
       }
     )
     (try! (contract-call? 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token 
-                transfer (calculate-penalty (get ustx swap)) tx-sender nexus (some 0x707265746D69756D))) ;; hold penalty
+                transfer this-penalty tx-sender nexus (some 0x707265746D69756D))) ;; hold penalty
     (ok (map-set swaps id (merge swap {stx-receiver: (some tx-sender), expired-height: (some (+ burn-block-height expiry)), when: burn-block-height, total-penalty: new-penalty}))))) ;; expiration kicks in
 
 (define-public (make-bid
@@ -437,14 +435,15 @@
                       (swap-id-extracted (unwrap! (get i payload) ERR-ELEMENT-EXPECTED))
                       (ustx-swap (get ustx swap))
                       (fee (/ ustx-swap u1000))
-                      (ustx-swap-receiver (- ustx-swap fee))) 
+                      (ustx-swap-receiver (- ustx-swap fee))
+                      (swap-stx-sender (get stx-sender swap))) 
                       (asserts! (is-eq stx-receiver-extracted stx-receiver) ERR_INVALID_STX_RECEIVER)
                       (asserts! (is-eq swap-id-extracted id) ERR_INVALID_ID)
                       (map-set swaps id (merge swap {done: true, total-penalty: none})) 
                       (try! (as-contract (contract-call? 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token 
                                                 transfer penalty tx-sender stx-receiver (some 0x707265746D69756D)))) 
                       (and (> remaining-penalty u0) (try! (as-contract (contract-call? 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token 
-                                                transfer remaining-penalty tx-sender stx-sender (some 0x707265746D69756D))))) 
+                                                transfer remaining-penalty tx-sender swap-stx-sender (some 0x707265746D69756D))))) 
                       (map-set submitted-btc-txs result id)
                       (print 
                         { 
